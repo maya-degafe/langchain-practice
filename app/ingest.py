@@ -1,6 +1,7 @@
 """PDF ingestion pipeline for the educational RAG example."""
 
 from __future__ import annotations
+from typing import Iterable
 
 from pathlib import Path
 

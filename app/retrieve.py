@@ -5,11 +5,8 @@ from __future__ import annotations
 import argparse
 from typing import Iterable
 
-from sqlalchemy import true
-
 from sentence_transformers import SentenceTransformer
 
-from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.preprocessing import normalize
 
 from app.config import ConfigError, get_settings
@@ -29,7 +26,7 @@ class EmbeddingService:
         text_list = list(texts)
         if not text_list:
             return []
-        vectors = self.model.encode(text_list, normalize_embedding=True, convert_to_numpy=True, show_progress_bar=False)
+        vectors = self.model.encode(text_list, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False)
         return vectors.tolist()
 
     def embed_query(self, text: str) -> list[float]:
