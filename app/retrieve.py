@@ -5,6 +5,10 @@ from __future__ import annotations
 import argparse
 from typing import Iterable
 
+from sqlalchemy import true
+
+from sentence_transformers import SentenceTransformer
+
 from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.preprocessing import normalize
 
@@ -15,13 +19,9 @@ from app.db import DatabaseError, get_connection, initialize_database, search_si
 class EmbeddingService:
     """Service for embedding text and queries into dense vectors."""
 
-    def __init__(self, model_name: str, *, dimensions: int) -> None:
+    def __init__(self, model_name: str, *, dimensions: int | None = None) -> None:
         self.model_name = model_name
-        self.vectorizer = HashingVectorizer(
-            n_features=dimensions,
-            alternate_sign=False,
-            norm=None,
-        )
+        self.model = SentenceTransformer(model_name)
 
     def embed_texts(self, texts: Iterable[str]) -> list[list[float]]:
         """Embed texts as normalized dense vectors for pgvector cosine search."""
@@ -29,12 +29,10 @@ class EmbeddingService:
         text_list = list(texts)
         if not text_list:
             return []
-        matrix = self.vectorizer.transform(text_list)
-        normalized = normalize(matrix, norm="l2", axis=1)
-        return normalized.toarray().tolist()
+        vectors = self.model.encode(text_list, normalize_embedding=True, convert_to_numpy=True, show_progress_bar=False)
+        return vectors.tolist()
 
     def embed_query(self, text: str) -> list[float]:
-        """Embed a single query string."""
 
         return self.embed_texts([text])[0]
 
