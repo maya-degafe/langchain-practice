@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_DIR = REPO_ROOT / "data"
+DEFAULT_DATA_DIR = REPO_ROOT / "data" # where the data is read from
 ENV_PATH = REPO_ROOT / ".env"
 
 load_dotenv(ENV_PATH, override=False)
@@ -36,8 +36,6 @@ class Settings:
     embedding_model: str
     embedding_dimension: int
     llm_backend: str
-    openai_model: str
-    openai_api_key: str | None
 
     @property
     def database_url(self) -> str:
@@ -80,23 +78,16 @@ def get_settings(*, require_llm: bool = False) -> Settings:
         postgres_host=os.getenv("POSTGRES_HOST", "localhost"),
         postgres_port=int(os.getenv("POSTGRES_PORT", "5432")),
         data_dir=data_dir,
-        chunk_size=int(os.getenv("CHUNK_SIZE", "1000")),
-        chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")),
-        top_k=int(os.getenv("TOP_K", "3")),
+        chunk_size=int(os.getenv("CHUNK_SIZE", "1000")), # chars per chunk
+        chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")), # shared text between chunks
+        top_k=int(os.getenv("TOP_K", "5")),
         embedding_model=os.getenv("EMBEDDING_MODEL", "simple-hashing").strip().lower(),
         embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "384")),
         llm_backend=os.getenv("LLM_BACKEND", "context_only").strip().lower(),
-        openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
     )
 
+    # enforce that chunk overlap is smaller than chunk size
     if settings.chunk_overlap >= settings.chunk_size:
         raise ConfigError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE.")
-
-    if require_llm and settings.llm_backend == "openai" and not settings.openai_api_key:
-        raise ConfigError(
-            "OPENAI_API_KEY is required when LLM_BACKEND=openai. "
-            "Set it in .env or switch LLM_BACKEND to context_only."
-        )
 
     return settings

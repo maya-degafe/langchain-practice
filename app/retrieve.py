@@ -13,11 +13,7 @@ from app.db import DatabaseError, get_connection, initialize_database, search_si
 
 
 class EmbeddingService:
-    """Small fully local embedding wrapper with no model downloads.
-
-    This project uses a hashing-based vectorizer to keep setup simple and reliable.
-    The class is isolated so you can swap in a different embedding model later.
-    """
+    """Service for embedding text and queries into dense vectors."""
 
     def __init__(self, model_name: str, *, dimensions: int) -> None:
         self.model_name = model_name
@@ -45,16 +41,18 @@ class EmbeddingService:
 
 def retrieve_chunks(query: str, *, top_k: int | None = None) -> list[dict]:
     """Run vector similarity search for a natural-language query."""
-
+    # load settings
     settings = get_settings()
+    # embed user query into the same vector space as document chunks
     embedding_service = EmbeddingService(settings.embedding_model, dimensions=settings.embedding_dimension)
     query_embedding = embedding_service.embed_query(query)
 
+    # open db connection, unsure schema exists, run similarity search
     with get_connection(settings) as connection:
         initialize_database(connection, settings)
         return search_similar_chunks(connection, query_embedding, top_k=top_k or settings.top_k)
 
-
+# output formatting
 def print_matches(matches: list[dict]) -> None:
     """Print retrieved chunks in a beginner-friendly format."""
 

@@ -4,83 +4,78 @@ from __future__ import annotations
 
 import argparse
 
-from openai import OpenAI
-
 from app.config import ConfigError, Settings, get_settings
 from app.db import DatabaseError
-from app.retrieve import print_matches, retrieve_chunks
+from app.retrieve import retrieve_chunks
 
 
-class SimpleLLM:
-    """A tiny answer-generation layer that can be swapped later."""
-
+class CapyLLM:
+    # LLM setup
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.system_prompt = (
+            "You are a helpful, enthusiastic assistant that ONLY answers questions using the provided PDF context."
+            "If the answer is not in the context, say:"
+            "Sorry, I do not know the answer to that question. Try rewording the question, or reaching out to our Help Desk at 888-888-8888."
+        )
+        self.min_similarity = 0.22
 
+    # Main answer pipeline: filter by similarity/question size, then call the LLM to answer
     def answer(self, question: str, matches: list[dict]) -> str:
         """Generate an answer from the retrieved chunks."""
 
-        if not matches:
-            return "I could not find any matching chunks. Try ingesting PDFs first or ask a broader question."
+        q = question.strip()
+        if not q: # if question is empty
+            # ideally a user shouldnt be able to get here, but j in case
+            return "Please provide a question for me to answer."
+        if len(q) > 700:
+            return "Your question is too long. Please shorten it to 700 characters or less."        
 
-        if self.settings.llm_backend == "openai":
-            return self._answer_with_openai(question, matches)
+        strong = [m for m in matches if float(m.get("similarity", 0.0)) >= self.min_similarity]
+        if not strong:
+            return "Sorry, I do not know the answer to that question. Try rewording the question, or reaching out to our Help Desk at 888-888-8888."
+        return self._answer_with_ollama(q, strong[:5])
+    
+    # Ollama generation
+    def _answer_with_ollama(self, question: str, matches: list[dict]) -> str:
 
-        return self._answer_with_context_only(matches)
-
-    def _answer_with_openai(self, question: str, matches: list[dict]) -> str:
-        """Use a small OpenAI chat completion call when configured."""
-
-        if not self.settings.openai_api_key:
+        try:
+            from langchain_ollama import ChatOllama
+        except Exception as exc:
             raise ConfigError(
-                "OPENAI_API_KEY is required when LLM_BACKEND=openai. "
-                "Set it in .env or switch LLM_BACKEND to context_only."
-            )
+                "langchain-ollama is required for LLM_BACKEND=ollama. Install with: uv add langchain-ollama"
+            ) from exc
 
-        client = OpenAI(api_key=self.settings.openai_api_key)
-        completion = client.chat.completions.create(
-            model=self.settings.openai_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Answer the user's question using only the provided PDF context. "
-                        "If the answer is not in the context, say so clearly."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": self._build_prompt(question, matches),
-                },
-            ],
+        model = getattr(self.settings, "gemma_model", "gemma3:4b")
+        base_url = getattr(self.settings, "gemma_base_url", "http://127.0.0.1:11434")
+
+        llm = ChatOllama(model=model, base_url=base_url, temperature=0.2)
+        prompt = self._build_prompt(question, matches)
+        response = llm.invoke(
+            [
+                ("system", self.system_prompt),
+                ("human", prompt),
+            ]
         )
-        return completion.choices[0].message.content or "No answer was returned by the LLM."
-
-    def _answer_with_context_only(self, matches: list[dict]) -> str:
-        """Return a simple context-based answer with no external API calls."""
-
-        summaries = []
-        for item in matches[:3]:
-            snippet = " ".join(item["content"].split())
-            summaries.append(f"- {item['source_file']} (chunk {item['chunk_index']}): {snippet[:280]}")
-        return (
-            "LLM_BACKEND=context_only, so this is a lightweight answer based on the top retrieved chunks:\n"
-            + "\n".join(summaries)
-        )
+        text = response.content if isinstance(response.content, str) else str(response.content)
+        # enforce fallback message
+        if "not in the context" in text.lower() or "do not provide" in text.lower():
+            return "Sorry, I do not know the answer to that question. Try rewording the question, or reaching out to our Help Desk at 888-888-8888."
+        return text
 
     @staticmethod
     def _build_prompt(question: str, matches: list[dict]) -> str:
         """Build a compact prompt that keeps the LLM layer easy to replace later."""
 
         context_blocks = []
-        for item in matches:
+        for item in matches[:5]: # limit to top 5 matches
             context_blocks.append(
                 f"Source: {item['source_file']} | Chunk: {item['chunk_index']}\n{item['content']}"
             )
         context = "\n\n".join(context_blocks)
         return f"Question: {question}\n\nContext:\n{context}"
 
-
+# cli entrypoint
 def main() -> None:
     """CLI entry point for asking questions in the terminal."""
 
@@ -96,8 +91,7 @@ def main() -> None:
     try:
         settings = get_settings(require_llm=False)
         matches = retrieve_chunks(question)
-        print_matches(matches)
-        llm = SimpleLLM(settings)
+        llm = CapyLLM(settings)
         print("Answer:\n")
         print(llm.answer(question, matches))
     except (ConfigError, DatabaseError) as exc:

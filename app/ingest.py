@@ -31,10 +31,11 @@ def find_pdf_files(data_dir: Path) -> list[Path]:
 
 
 def extract_pdf_text(pdf_path: Path) -> str:
-    """Extract text from one PDF file using pypdf."""
 
+    # read pdf and extract text per page with pypdf
     reader = PdfReader(str(pdf_path))
     page_text = [page.extract_text() or "" for page in reader.pages]
+    # join all pages into one string, stripping whitespace and skipping empty pages
     text = "\n".join(part.strip() for part in page_text if part.strip())
     if not text:
         raise IngestError(f"No text could be extracted from {pdf_path.name}.")
@@ -49,6 +50,7 @@ def split_text(text: str, *, chunk_size: int, chunk_overlap: int) -> list[str]:
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
+    # return a list of strings, not Document objects, since we only need the text for embedding
     return splitter.split_text(text)
 
 
@@ -56,22 +58,30 @@ def split_text(text: str, *, chunk_size: int, chunk_overlap: int) -> list[str]:
 def ingest_pdfs() -> None:
     """Read PDFs, embed their chunks, and store them in PostgreSQL."""
 
+    # load app settings from .env
     settings = get_settings()
+    # find input files
     pdf_files = find_pdf_files(settings.data_dir)
+    # create embedding service by model + vector dimensions
     embedding_service = EmbeddingService(settings.embedding_model, dimensions=settings.embedding_dimension)
 
+    # open db connection and ensure required schema/table exist
     with get_connection(settings) as connection:
         initialize_database(connection, settings)
 
         total_chunks = 0
         for pdf_path in pdf_files:
+            # extract full text from pdf
             text = extract_pdf_text(pdf_path)
+            # split into overlapping chunks
             chunks = split_text(
                 text,
                 chunk_size=settings.chunk_size,
                 chunk_overlap=settings.chunk_overlap,
             )
+            # convert each chunk to embedding vector and prepare for db insert
             embeddings = embedding_service.embed_texts(chunks)
+            #create db rows
             rows = [
                 (
                     index,
@@ -82,8 +92,10 @@ def ingest_pdfs() -> None:
                     },
                     embedding,
                 )
+                # strict=True ensures that chunks and embeddings are the same length, otherwise raise ValueError
                 for index, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True))
             ]
+            # replace any existing chunks for this pdf with new rows
             inserted = replace_document_chunks(connection, pdf_path.name, rows)
             total_chunks += inserted
             print(f"Ingested {inserted} chunks from {pdf_path.name}")
