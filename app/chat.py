@@ -15,6 +15,7 @@ class CapyLLM:
         self.settings = settings
         self.system_prompt = (
             "You are a helpful, enthusiastic assistant that ONLY answers questions using the provided PDF context."
+            "Response does not COPY the context verbatim, unless it is a quoted phrase that DIRECTLY answers the question."
             "If the answer is not in the context, say:"
             "Sorry, I do not know the answer to that question. Try rewording the question, or reaching out to our Help Desk at 888-888-8888."
         )
@@ -49,6 +50,7 @@ class CapyLLM:
         model = getattr(self.settings, "gemma_model", "gemma3:4b")
         base_url = getattr(self.settings, "gemma_base_url", "http://127.0.0.1:11434")
 
+        # temperature = measures randomness of the model's output. 0.0 = deterministic, 1.0 = random
         llm = ChatOllama(model=model, base_url=base_url, temperature=0.2)
         prompt = self._build_prompt(question, matches)
         response = llm.invoke(
