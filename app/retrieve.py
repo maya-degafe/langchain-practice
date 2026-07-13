@@ -12,25 +12,35 @@ from sklearn.preprocessing import normalize
 from app.config import ConfigError, get_settings
 from app.db import DatabaseError, get_connection, initialize_database, search_similar_chunks
 
+# for caching and reloading model weights each run
+from functools import lru_cache
+from sentence_transformers import SentenceTransformer
+
+@lru_cache(maxsize=4)
+def _get_st_model(model_name: str) -> SentenceTransformer:
+    """Load once per process, then reuse."""
+    return SentenceTransformer(model_name)
 
 class EmbeddingService:
     """Service for embedding text and queries into dense vectors."""
 
     def __init__(self, model_name: str, *, dimensions: int | None = None) -> None:
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
+        self.model = _get_st_model(model_name)
 
     def embed_texts(self, texts: Iterable[str]) -> list[list[float]]:
-        """Embed texts as normalized dense vectors for pgvector cosine search."""
-
         text_list = list(texts)
         if not text_list:
             return []
-        vectors = self.model.encode(text_list, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False)
+        vectors = self.model.encode(
+            text_list,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
         return vectors.tolist()
 
     def embed_query(self, text: str) -> list[float]:
-
         return self.embed_texts([text])[0]
 
 
