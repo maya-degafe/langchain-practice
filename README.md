@@ -31,8 +31,12 @@ The goal is to keep the code easy to read and easy to modify.
 │   ├── config.py
 │   ├── db.py
 │   ├── ingest.py
-│   └── retrieve.py
+│   ├── intent.py
+│   ├── normalize.py
+│   ├── retrieve.py
+│   └── safety_rules.py
 ├── data/
+│   └── growing_veggies_in_fl.pdf
 ├── .env.example
 ├── docker-compose.yml
 ├── Makefile
@@ -131,7 +135,7 @@ python -m app.chat --question "What are the main ideas in the PDFs?"
 Or use interactive mode:
 
 ```bash
-python -m app.chat
+python -m app.chat session-id
 ```
 
 Or use:
@@ -157,20 +161,6 @@ By default, the app uses:
 ```env
 LLM_BACKEND=context_only
 ```
-
-That mode does **not** call an external API. It simply returns a lightweight answer based on the retrieved chunks so you can study the retrieval flow first.
-
-### Optional API mode: OpenAI
-
-If you want real LLM-based answer generation, set:
-
-```env
-LLM_BACKEND=openai
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-4o-mini
-```
-
-The OpenAI-specific code is isolated in `app/chat.py`, so you can later swap it for Claude or another provider.
 
 ## Retrieval flow test
 
@@ -198,25 +188,6 @@ Important columns:
 - `embedding`: pgvector embedding used for similarity search
 
 The app also enables the `vector` extension automatically.
-
-## Helpful commands
-
-```bash
-make up
-make down
-make ingest
-make chat QUESTION="What does the PDF say about X?"
-make retrieve QUERY="What does the PDF say about X?"
-```
-
-## Error handling included
-
-The project includes simple error messages for:
-
-- missing required environment variables
-- missing PDF files in `data/`
-- database connection problems
-- missing OpenAI API key when `LLM_BACKEND=openai`
 
 ## Notes
 
