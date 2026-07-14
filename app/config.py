@@ -36,6 +36,12 @@ class Settings:
     embedding_model: str
     embedding_dimension: int
     llm_backend: str
+    # --- LLM backend settings (new) ---
+    ollama_model: str
+    ollama_base_url: str
+    bedrock_model: str
+    bedrock_base_url: str
+    bedrock_api_key: str
 
     @property
     def database_url(self) -> str:
@@ -84,6 +90,18 @@ def get_settings(*, require_llm: bool = False) -> Settings:
         embedding_model=os.getenv("EMBEDDING_MODEL", "simple-hashing").strip().lower(),
         embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "384")),
         llm_backend=os.getenv("LLM_BACKEND", "context_only").strip().lower(),
+        # --- LLM backend settings (new) ---
+        ollama_model=os.getenv("OLLAMA_MODEL", "gemma3:4b"),
+        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+        bedrock_model=os.getenv("BEDROCK_MODEL", "openai.gpt-oss-120b"),
+        bedrock_base_url=os.getenv(
+            "BEDROCK_BASE_URL",
+            os.getenv("OPENAI_BASE_URL", "https://bedrock-mantle.us-east-1.api.aws/v1"),
+        ),
+        bedrock_api_key=os.getenv("BEDROCK_API_KEY")
+        or os.getenv("AWS_BEARER_TOKEN_BEDROCK")
+        or os.getenv("OPENAI_API_KEY")
+        or "",
     )
 
     # enforce that chunk overlap is smaller than chunk size

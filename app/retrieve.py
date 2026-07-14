@@ -5,8 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import Iterable
 
-from sentence_transformers import SentenceTransformer
-
+from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.preprocessing import normalize
 
 from app.config import ConfigError, get_settings
@@ -14,11 +13,12 @@ from app.db import DatabaseError, get_connection, initialize_database, search_si
 
 # for caching and reloading model weights each run
 from functools import lru_cache
-from sentence_transformers import SentenceTransformer
 
 @lru_cache(maxsize=4)
-def _get_st_model(model_name: str) -> SentenceTransformer:
+def _get_st_model(model_name: str):
     """Load once per process, then reuse."""
+    from sentence_transformers import SentenceTransformer
+
     return SentenceTransformer(model_name)
 
 class EmbeddingService:
@@ -26,12 +26,23 @@ class EmbeddingService:
 
     def __init__(self, model_name: str, *, dimensions: int | None = None) -> None:
         self.model_name = model_name
-        self.model = _get_st_model(model_name)
+        self.dimensions = dimensions or 384
+        if model_name == "simple-hashing":
+            self.model = HashingVectorizer(
+                n_features=self.dimensions,
+                alternate_sign=False,
+                norm=None,
+            )
+        else:
+            self.model = _get_st_model(model_name)
 
     def embed_texts(self, texts: Iterable[str]) -> list[list[float]]:
         text_list = list(texts)
         if not text_list:
             return []
+        if self.model_name == "simple-hashing":
+            vectors = self.model.transform(text_list)
+            return normalize(vectors, norm="l2").toarray().tolist()
         vectors = self.model.encode(
             text_list,
             normalize_embeddings=True,

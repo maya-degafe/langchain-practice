@@ -58,17 +58,46 @@ class CapyLLM:
             "I can help with airline-related questions or information from our policies."
         )
 
-        try:
-            from langchain_ollama import ChatOllama
-        except Exception as exc:
-            raise ConfigError(
-                "langchain-ollama is required for LLM_BACKEND=ollama. "
-                "Install with: uv add langchain-ollama"
-            ) from exc
+        # --- Choose LLM backend based on settings.llm_backend ---
+        backend = (self.settings.llm_backend or "ollama").strip().lower()
 
-        model = getattr(self.settings, "ollama_model", "gemma3:4b")
-        base_url = getattr(self.settings, "ollama_base_url", "http://127.0.0.1:11434")
-        self.llm = ChatOllama(model=model, base_url=base_url, temperature=0.2)
+        if backend == "bedrock":
+            # Bedrock via its OpenAI-compatible endpoint (uses the openai client under the hood).
+            try:
+                from langchain_openai import ChatOpenAI
+            except Exception as exc:
+                raise ConfigError(
+                    "langchain-openai is required for LLM_BACKEND=bedrock. "
+                    "Install with: uv add langchain-openai"
+                ) from exc
+
+            if not self.settings.bedrock_api_key:
+                raise ConfigError(
+                    "LLM_BACKEND=bedrock requires a Bedrock API key. "
+                    "Set BEDROCK_API_KEY in your .env file."
+                )
+
+            self.llm = ChatOpenAI(
+                model=self.settings.bedrock_model,          # e.g. openai.gpt-oss-120b
+                base_url=self.settings.bedrock_base_url,    # <-- THE BEDROCK URL GOES HERE (from .env)
+                api_key=self.settings.bedrock_api_key,      # from .env
+                temperature=0.2,
+            )
+        else:
+            # Default / "ollama" backend (local Gemma via Ollama).
+            try:
+                from langchain_ollama import ChatOllama
+            except Exception as exc:
+                raise ConfigError(
+                    "langchain-ollama is required for LLM_BACKEND=ollama. "
+                    "Install with: uv add langchain-ollama"
+                ) from exc
+
+            self.llm = ChatOllama(
+                model=self.settings.ollama_model,
+                base_url=self.settings.ollama_base_url,
+                temperature=0.2,
+            )
 
         self.system_prompt = _load_system_prompt()
 
