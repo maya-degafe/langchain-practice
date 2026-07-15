@@ -83,6 +83,14 @@ class CapyLLM:
                 api_key=self.settings.bedrock_api_key,      # from .env
                 temperature=0.2,
             )
+
+        elif backend == "bedrock_native":
+            from langchain_aws import ChatBedrockConverse
+            self.llm = ChatBedrockConverse(
+                model=self.settings.bedrock_model,   # e.g. anthropic.claude-3-5-haiku-...
+                region_name="us-east-1",
+                temperature=0.2,
+            )
         else:
             # Default / "ollama" backend (local Gemma via Ollama).
             try:
