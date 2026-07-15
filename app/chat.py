@@ -22,7 +22,7 @@ def _load_system_prompt() -> str:
 
 
 class CapyLLM:
-    """Airline assistant backed by PDF retrieval and an LLM."""
+    """Assistant backed by PDF retrieval and an LLM."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -33,29 +33,30 @@ class CapyLLM:
         self.min_similarity = 0.22
         self.min_top_similarity = 0.30
 
+        # NOTE: Update this message to match your ACTUAL document domain.
         self.domain_redirect = (
-        "I can help with questions about gardening, addiction, agriculture, "
-        "and information from the provided documents. What do you need help with?"
-        )               
+            "I can help with questions based on the provided documents. "
+            "What would you like to know?"
+        )
 
         self.fallback = (
             "Sorry, I do not know the answer to that question. "
             "Try rewording the question, or reaching out to our Help Desk at 888-888-8888."
         )
 
-        self.airline_redirect = (
-            "I can help with airline-related questions, travel policies, and information "
-            "from our policies. What do you need help with?"
+        self.no_match = (
+            "I couldn't find relevant information in the provided documents for that question. "
+            "Please try rewording it or asking about a more specific topic."
         )
 
         self.repair_redirect = (
-            "You're right — let me reset. I can help with airline-related questions or "
-            "information from our policies. What would you like help with?"
+            "You're right — let me reset. I can help with information from our documents. "
+            "What would you like help with?"
         )
 
         self.safety_redirect = (
             "If this is an urgent emergency, please contact local emergency services right away. "
-            "I can help with airline-related questions or information from our policies."
+            "I can help with information from our documents."
         )
 
         # --- Choose LLM backend based on settings.llm_backend ---
@@ -78,7 +79,7 @@ class CapyLLM:
                 )
 
             self.llm = ChatOpenAI(
-                model=self.settings.bedrock_model,          # e.g. openai.gpt-oss-120b
+                model=self.settings.bedrock_model,          # e.g. openai.gpt-oss-20b
                 base_url=self.settings.bedrock_base_url,    # <-- THE BEDROCK URL GOES HERE (from .env)
                 api_key=self.settings.bedrock_api_key,      # from .env
                 temperature=0.2,
@@ -147,35 +148,30 @@ class CapyLLM:
 
         intent = classify_intent(q)
 
+        # Safety and repair intents always take priority.
         if intent.intent == "safety":
             return self.safety_redirect
 
         if intent.intent == "repair":
             return self.repair_redirect
 
-        if intent.intent == "other":
-            return self.domain_redirect
-
+        # Retrieve first so a strong match can override a weak/incorrect intent label.
         matches = retrieve_chunks(q)
+        has_relevant = self._has_relevant_match(matches)
 
-        if not self._has_relevant_match(matches):
+        # Only redirect as "other" if retrieval ALSO fails to find anything relevant.
+        # This rescues short/vague-but-on-topic questions (e.g. "tell me about CO2")
+        # that the intent classifier mislabels as "other".
+        if intent.intent == "other" and not has_relevant:
             return self.domain_redirect
 
-        if not self._has_relevant_match(matches):
-            return (
-                "I couldn't find relevant information in the provided documents for that question. "
-                "Please try asking about a specific airline policy, baggage rule, booking issue, "
-                "refund, or flight change."
-            )
+        if not has_relevant:
+            return self.no_match
 
         strong = [m for m in matches if float(m.get("similarity", 0.0)) >= self.min_similarity]
 
         if not strong:
-            return (
-                "I couldn't find relevant information in the provided documents for that question. "
-                "Please try asking about a specific airline policy, baggage rule, booking issue, "
-                "refund, or flight change."
-            )
+            return self.no_match
 
         context = self._build_context(strong[:5])
 
@@ -243,3 +239,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

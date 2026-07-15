@@ -87,7 +87,7 @@ def get_settings(*, require_llm: bool = False) -> Settings:
         chunk_size=int(os.getenv("CHUNK_SIZE", "1000")), # chars per chunk
         chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")), # shared text between chunks
         top_k=int(os.getenv("TOP_K", "5")),
-        embedding_model=os.getenv("EMBEDDING_MODEL", "simple-hashing").strip().lower(),
+        embedding_model=os.getenv("EMBEDDING_MODEL", "simple-hashing").strip(),
         embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "384")),
         llm_backend=os.getenv("LLM_BACKEND", "context_only").strip().lower(),
         # --- LLM backend settings (new) ---

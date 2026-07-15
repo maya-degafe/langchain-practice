@@ -52,6 +52,9 @@ class EmbeddingService:
         return vectors.tolist()
 
     def embed_query(self, text: str) -> list[float]:
+        # BGE models embed *queries* with an instruction prefix; documents without it.
+        if "bge" in self.model_name.lower():
+            text = "Represent this sentence for searching relevant passages: " + text
         return self.embed_texts([text])[0]
 
 
