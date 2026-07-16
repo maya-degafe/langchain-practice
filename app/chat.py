@@ -175,10 +175,16 @@ class CapyLLM:
 
         context = self._build_context(strong[:5])
 
-        response = self.chain_with_history.invoke(
-            {"question": q, "context": context},
-            config={"configurable": {"session_id": session_id}},
-        )
+        try:
+            response = self.chain_with_history.invoke(
+                {"question": q, "context": context},
+                config={"configurable": {"session_id": session_id}},
+            )
+        except Exception as exc:
+            backend_error = self._friendly_llm_error(exc)
+            if backend_error:
+                return backend_error
+            raise
 
         text = response.content if isinstance(response.content, str) else str(response.content)
 
@@ -203,6 +209,36 @@ class CapyLLM:
                 f"Source: {item['source_file']} | Chunk: {item['chunk_index']}\n{item['content']}"
             )
         return "\n\n".join(blocks)
+
+    def _friendly_llm_error(self, exc: Exception) -> str | None:
+        """Return a user-friendly backend error message when known failures occur."""
+        message = str(exc)
+        lowered = message.lower()
+        backend = (self.settings.llm_backend or "unknown").strip().lower()
+        exc_name = type(exc).__name__.lower()
+
+        if "connection refused" in lowered or "connecterror" in exc_name:
+            return (
+                f"Could not reach the {backend} backend. "
+                "Make sure the service is running and try again."
+            )
+
+        auth_markers = [
+            "authenticationerror",
+            "invalid_api_key",
+            "permission_denied_error",
+            "signature expired",
+            "unauthorized",
+            "error code: 401",
+        ]
+        if any(marker in lowered for marker in auth_markers):
+            return (
+                "The model backend rejected authentication (401). "
+                "Your API key or temporary token may be expired. "
+                "Refresh your credentials in .env and retry."
+            )
+
+        return None
 
 
 def main() -> None:
