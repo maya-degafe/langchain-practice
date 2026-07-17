@@ -42,6 +42,10 @@ class Settings:
     bedrock_model: str
     bedrock_base_url: str
     bedrock_api_key: str
+    # --- Anthropic (Claude via Bedrock Messages API) ---
+    anthropic_model: str
+    anthropic_base_url: str
+    anthropic_api_key: str
 
     @property
     def database_url(self) -> str:
@@ -102,6 +106,13 @@ def get_settings(*, require_llm: bool = False) -> Settings:
         or os.getenv("AWS_BEARER_TOKEN_BEDROCK")
         or os.getenv("OPENAI_API_KEY")
         or "",
+        # --- Anthropic (Claude via Bedrock Messages API) ---
+        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5"),
+        anthropic_base_url=os.getenv(
+            "ANTHROPIC_BASE_URL",
+            "https://bedrock-mantle.us-east-1.api.aws/anthropic",
+        ),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
     )
 
     # enforce that chunk overlap is smaller than chunk size

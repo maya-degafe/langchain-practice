@@ -85,6 +85,29 @@ class CapyLLM:
                 temperature=0.2,
             )
 
+        elif backend == "anthropic":
+            # Claude via Bedrock's Anthropic-native Messages API (/anthropic endpoint).
+            try:
+                from langchain_anthropic import ChatAnthropic
+            except Exception as exc:
+                raise ConfigError(
+                    "langchain-anthropic is required for LLM_BACKEND=anthropic. "
+                    "Install with: uv add langchain-anthropic"
+                ) from exc
+
+            if not self.settings.anthropic_api_key:
+                raise ConfigError(
+                    "LLM_BACKEND=anthropic requires ANTHROPIC_API_KEY in your .env file."
+                )
+
+            self.llm = ChatAnthropic(
+                model=self.settings.anthropic_model,          # e.g. claude-haiku-4-5
+                base_url=self.settings.anthropic_base_url,    # the /anthropic endpoint
+                api_key=self.settings.anthropic_api_key,      # from .env
+                temperature=0.2,
+                max_tokens=500,                               # cap = faster responses
+            )
+
         elif backend == "bedrock_native":
             from langchain_aws import ChatBedrockConverse
             self.llm = ChatBedrockConverse(
@@ -275,4 +298,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -15,7 +15,7 @@ class SafetyResult:
     category: str
 
 
-# --- Self-harm / crisis language ---------------------------------------------
+# Self-harm / crisis language
 SELF_HARM_PATTERNS = [
     re.compile(r"\bkill\s+myself\b"),
     re.compile(r"\bkill\s+my\s+self\b"),
@@ -32,7 +32,7 @@ SELF_HARM_PATTERNS = [
     re.compile(r"\boverdos(e|ing)\b"),
 ]
 
-# --- Airline security threats -------------------------------------------------
+# Airline security threats 
 # For an airline assistant, threats of violence toward aircraft/passengers must
 # be caught and handled seriously (canned response + escalation), never fed to
 # the LLM as a normal question.
@@ -59,8 +59,8 @@ def _normalize(text: str) -> str:
     normalized text (e.g. from app.normalize.normalize_text), this is harmless.
     """
     t = text.lower()
-    t = re.sub(r"[^a-z0-9'\s]+", " ", t)  # drop punctuation, keep apostrophes
-    t = " ".join(t.split())               # collapse whitespace
+    t = re.sub(r"[^a-z0-9'\s]+", " ", t)  
+    t = " ".join(t.split())               
     return t
 
 
@@ -95,3 +95,4 @@ def looks_like_safety_risk(text: str) -> bool:
     that only need a yes/no answer can keep using this.
     """
     return scan_safety(text).is_risk
+
