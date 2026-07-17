@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Dict
 
@@ -28,8 +29,6 @@ class CapyLLM:
         self.settings = settings
 
         # Retrieval thresholds:
-        # - min_similarity filters retrieved chunks before context building
-        # - min_top_similarity decides whether retrieval is relevant enough to use at all
         self.min_similarity = 0.22
         self.min_top_similarity = 0.30
 
@@ -57,6 +56,12 @@ class CapyLLM:
         self.safety_redirect = (
             "If this is an urgent emergency, please contact local emergency services right away. "
             "I can help with information from our documents."
+        )
+
+        self.escalation = (
+            "I'll connect you with a CapAir customer service representative. "
+            "Please call our Help Desk at 888-888-8888, and have your booking "
+            "reference ready. Is there anything else I can help you find in the meantime?"
         )
 
         # --- Choose LLM backend based on settings.llm_backend ---
@@ -101,19 +106,20 @@ class CapyLLM:
                 )
 
             self.llm = ChatAnthropic(
-                model=self.settings.anthropic_model,          # e.g. claude-haiku-4-5
-                base_url=self.settings.anthropic_base_url,    # the /anthropic endpoint
-                api_key=self.settings.anthropic_api_key,      # from .env
+                model=self.settings.anthropic_model,
+                base_url=self.settings.anthropic_base_url,
+                api_key=self.settings.anthropic_api_key,
                 temperature=0.2,
-                max_tokens=500,                               # cap = faster responses
+                max_tokens=300,
             )
 
         elif backend == "bedrock_native":
             from langchain_aws import ChatBedrockConverse
             self.llm = ChatBedrockConverse(
-                model=self.settings.bedrock_model,   # e.g. anthropic.claude-3-5-haiku-...
-                region_name="us-east-1",
+                model=self.settings.bedrock_model,
+                region_name=os.getenv("AWS_REGION", "us-east-1"),
                 temperature=0.2,
+                max_tokens=300,
             )
         else:
             # Default / "ollama" backend (local Gemma via Ollama).
@@ -159,6 +165,39 @@ class CapyLLM:
             history_messages_key="history",
         )
 
+    def _is_escalation_request(self, q: str) -> bool:
+        """Detect explicit requests to reach a human representative."""
+        lowered = q.lower().strip()
+        if lowered in {"agent", "human", "representative", "rep"}:
+            return True
+        phrases = [
+            "talk to a person",
+            "speak to a human",
+            "speak to an agent",
+            "talk to an agent",
+            "real person",
+            "customer service rep",
+            "talk to a human",
+            "talk to someone",
+        ]
+        return any(phrase in lowered for phrase in phrases)
+
+    def _is_competitor_request(self, q: str) -> bool:
+        """Detect requests to compare or recommend non-CapAir airlines."""
+        lowered = q.lower().strip()
+        if "airline" not in lowered and "airlines" not in lowered:
+            return False
+        phrases = [
+            "recommend a different airline",
+            "recommend another airline",
+            "recommend other airlines",
+            "different airline",
+            "another airline",
+            "other airlines",
+            "compare capair",
+        ]
+        return any(phrase in lowered for phrase in phrases)
+
     def answer(self, question: str, session_id: str = "cli") -> str:
         """Route the user message before deciding whether to retrieve and call the LLM."""
         q = question.strip()
@@ -168,6 +207,17 @@ class CapyLLM:
 
         if len(q) > 700:
             return "Your question is too long. Please shorten it to 700 characters or less."
+
+        # --- Escalation: explicit request for a human takes priority ---
+        if self._is_escalation_request(q):
+            return self.escalation
+
+        if self._is_competitor_request(q):
+            return (
+                "I can't recommend, compare, or endorse other airlines. "
+                "I can help with CapAir policies, or connect you with a CapAir "
+                "customer service representative at 888-888-8888."
+            )
 
         intent = classify_intent(q)
 
