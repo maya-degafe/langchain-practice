@@ -1,6 +1,9 @@
+"""Terminal chat workflow for the educational PDF RAG example."""
+
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Dict
 
@@ -25,25 +28,29 @@ import re
 
 
 def _strip_markdown(text: str) -> str:
-    # removes headers (#, ##, ###...)
+    """Remove common Markdown so terminal output is clean plain text."""
+    # Remove headers (#, ##, ###...)
     text = re.sub(r"^\s*#{1,6}\s*", "", text, flags=re.MULTILINE)
-    # removes **bold** and __bold__
+    # Remove **bold** and __bold__
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"__(.+?)__", r"\1", text)
-    # removes *italic* and _italic_
+    # Remove *italic* and _italic_
     text = re.sub(r"\*(.+?)\*", r"\1", text)
     text = re.sub(r"_(.+?)_", r"\1", text)
-    # normalizes bullet markers (* or -) to a simple dash
+    # Normalize bullet markers (* or -) to a simple dash
     text = re.sub(r"^(\s*)[\*\-]\s+", r"\1- ", text, flags=re.MULTILINE)
     return text
 class CapyLLM:
+    """Assistant backed by PDF retrieval and an LLM."""
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-        # retrieval thresholds
+        # Retrieval thresholds:
         self.min_similarity = 0.22
         self.min_top_similarity = 0.30
 
+        # NOTE: Update this message to match your ACTUAL document domain.
         self.domain_redirect = (
             "I can help with questions based on the provided documents. "
             "What would you like to know?"
@@ -75,26 +82,78 @@ class CapyLLM:
             "reference ready. Is there anything else I can help you find in the meantime?"
         )
 
-        try:
-            from langchain_anthropic import ChatAnthropic
-        except Exception as exc:
-            raise ConfigError(
-                "langchain-anthropic is required. "
-                "Install with: uv add langchain-anthropic"
-            ) from exc
+        # --- Choose LLM backend based on settings.llm_backend ---
+        backend = (self.settings.llm_backend or "ollama").strip().lower()
 
-        if not self.settings.anthropic_api_key:
-            raise ConfigError(
-                "ANTHROPIC_API_KEY is required. Set it in your .env file."
+        if backend == "bedrock":
+            # Bedrock via its OpenAI-compatible endpoint (uses the openai client under the hood).
+            try:
+                from langchain_openai import ChatOpenAI
+            except Exception as exc:
+                raise ConfigError(
+                    "langchain-openai is required for LLM_BACKEND=bedrock. "
+                    "Install with: uv add langchain-openai"
+                ) from exc
+
+            if not self.settings.bedrock_api_key:
+                raise ConfigError(
+                    "LLM_BACKEND=bedrock requires a Bedrock API key. "
+                    "Set BEDROCK_API_KEY in your .env file."
+                )
+
+            self.llm = ChatOpenAI(
+                model=self.settings.bedrock_model,          # e.g. openai.gpt-oss-20b
+                base_url=self.settings.bedrock_base_url,    # <-- THE BEDROCK URL GOES HERE (from .env)
+                api_key=self.settings.bedrock_api_key,      # from .env
+                temperature=0.2,
             )
 
-        self.llm = ChatAnthropic(
-            model=self.settings.anthropic_model,
-            base_url=self.settings.anthropic_base_url,
-            api_key=self.settings.anthropic_api_key,
-            temperature=0.2,
-            max_tokens=300,
-        )
+        elif backend == "anthropic":
+            # Claude via Bedrock's Anthropic-native Messages API (/anthropic endpoint).
+            try:
+                from langchain_anthropic import ChatAnthropic
+            except Exception as exc:
+                raise ConfigError(
+                    "langchain-anthropic is required for LLM_BACKEND=anthropic. "
+                    "Install with: uv add langchain-anthropic"
+                ) from exc
+
+            if not self.settings.anthropic_api_key:
+                raise ConfigError(
+                    "LLM_BACKEND=anthropic requires ANTHROPIC_API_KEY in your .env file."
+                )
+
+            self.llm = ChatAnthropic(
+                model=self.settings.anthropic_model,
+                base_url=self.settings.anthropic_base_url,
+                api_key=self.settings.anthropic_api_key,
+                temperature=0.2,
+                max_tokens=300,
+            )
+
+        elif backend == "bedrock_native":
+            from langchain_aws import ChatBedrockConverse
+            self.llm = ChatBedrockConverse(
+                model=self.settings.bedrock_model,
+                region_name=os.getenv("AWS_REGION", "us-east-1"),
+                temperature=0.2,
+                max_tokens=300,
+            )
+        else:
+            # Default / "ollama" backend (local Gemma via Ollama).
+            try:
+                from langchain_ollama import ChatOllama
+            except Exception as exc:
+                raise ConfigError(
+                    "langchain-ollama is required for LLM_BACKEND=ollama. "
+                    "Install with: uv add langchain-ollama"
+                ) from exc
+
+            self.llm = ChatOllama(
+                model=self.settings.ollama_model,
+                base_url=self.settings.ollama_base_url,
+                temperature=0.2,
+            )
 
         self.system_prompt = _load_system_prompt()
 

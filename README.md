@@ -21,6 +21,28 @@ The goal is to keep the code easy to read and easy to modify.
 7. Prints the matched chunks so you can see what was retrieved
 8. Generates an answer with a very simple LLM wrapper
 
+## Project structure
+
+```text
+.
+├── app/
+│   ├── __init__.py
+│   ├── chat.py
+│   ├── config.py
+│   ├── db.py
+│   ├── ingest.py
+│   ├── intent.py
+│   ├── normalize.py
+│   ├── retrieve.py
+│   └── safety_rules.py
+├── data/
+│   └── growing_veggies_in_fl.pdf
+├── .env.example
+├── docker-compose.yml
+├── Makefile
+├── README.md
+└── requirements.txt
+```
 
 ## Prerequisites
 
