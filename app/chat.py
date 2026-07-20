@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Dict
 
+from sqlalchemy import text
+
 from app.config import ConfigError, Settings, get_settings
 from app.db import DatabaseError
 from app.intent import classify_intent
@@ -22,6 +24,22 @@ def _load_system_prompt() -> str:
     return prompt_path.read_text(encoding="utf-8").strip()
 
 
+import re
+
+
+def _strip_markdown(text: str) -> str:
+    """Remove common Markdown so terminal output is clean plain text."""
+    # Remove headers (#, ##, ###...)
+    text = re.sub(r"^\s*#{1,6}\s*", "", text, flags=re.MULTILINE)
+    # Remove **bold** and __bold__
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"__(.+?)__", r"\1", text)
+    # Remove *italic* and _italic_
+    text = re.sub(r"\*(.+?)\*", r"\1", text)
+    text = re.sub(r"_(.+?)_", r"\1", text)
+    # Normalize bullet markers (* or -) to a simple dash
+    text = re.sub(r"^(\s*)[\*\-]\s+", r"\1- ", text, flags=re.MULTILINE)
+    return text
 class CapyLLM:
     """Assistant backed by PDF retrieval and an LLM."""
 
@@ -263,8 +281,10 @@ class CapyLLM:
 
         if any(x in text.lower() for x in ["not in the context", "don't know", "do not know"]):
             return self.fallback
+        
+        return _strip_markdown(text)
 
-        return text
+    
 
     def _has_relevant_match(self, matches: list[dict]) -> bool:
         """Check whether the top retrieval hit is strong enough to trust."""
