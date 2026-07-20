@@ -1,13 +1,11 @@
-"""Terminal chat workflow for the educational PDF RAG example."""
+"""Terminal chat workflow for the CapAir PDF RAG assistant."""
 
 from __future__ import annotations
 
 import argparse
-import os
+import re
 from pathlib import Path
 from typing import Dict
-
-from sqlalchemy import text
 
 from app.config import ConfigError, Settings, get_settings
 from app.db import DatabaseError
@@ -24,147 +22,76 @@ def _load_system_prompt() -> str:
     return prompt_path.read_text(encoding="utf-8").strip()
 
 
-import re
-
-
 def _strip_markdown(text: str) -> str:
-    """Remove common Markdown so terminal output is clean plain text."""
-    # Remove headers (#, ##, ###...)
+    """Strip common Markdown so terminal output is plain text."""
     text = re.sub(r"^\s*#{1,6}\s*", "", text, flags=re.MULTILINE)
-    # Remove **bold** and __bold__
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"__(.+?)__", r"\1", text)
-    # Remove *italic* and _italic_
     text = re.sub(r"\*(.+?)\*", r"\1", text)
     text = re.sub(r"_(.+?)_", r"\1", text)
-    # Normalize bullet markers (* or -) to a simple dash
     text = re.sub(r"^(\s*)[\*\-]\s+", r"\1- ", text, flags=re.MULTILINE)
     return text
+
+
 class CapyLLM:
-    """Assistant backed by PDF retrieval and an LLM."""
+    """CapAir assistant backed by PDF retrieval and Claude (Anthropic)."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-        # Retrieval thresholds:
         self.min_similarity = 0.22
         self.min_top_similarity = 0.30
 
-        # NOTE: Update this message to match your ACTUAL document domain.
         self.domain_redirect = (
             "I can help with questions based on the provided documents. "
             "What would you like to know?"
         )
-
         self.fallback = (
             "Sorry, I do not know the answer to that question. "
             "Try rewording the question, or reaching out to our Help Desk at 888-888-8888."
         )
-
         self.no_match = (
             "I couldn't find relevant information in the provided documents for that question. "
             "Please try rewording it or asking about a more specific topic."
         )
-
         self.repair_redirect = (
             "You're right — let me reset. I can help with information from our documents. "
             "What would you like help with?"
         )
-
         self.safety_redirect = (
             "If this is an urgent emergency, please contact local emergency services right away. "
             "I can help with information from our documents."
         )
-
         self.escalation = (
             "I'll connect you with a CapAir customer service representative. "
             "Please call our Help Desk at 888-888-8888, and have your booking "
             "reference ready. Is there anything else I can help you find in the meantime?"
         )
 
-        # --- Choose LLM backend based on settings.llm_backend ---
-        backend = (self.settings.llm_backend or "ollama").strip().lower()
+        try:
+            from langchain_anthropic import ChatAnthropic
+        except Exception as exc:
+            raise ConfigError(
+                "langchain-anthropic is required. Install with: uv add langchain-anthropic"
+            ) from exc
 
-        if backend == "bedrock":
-            # Bedrock via its OpenAI-compatible endpoint (uses the openai client under the hood).
-            try:
-                from langchain_openai import ChatOpenAI
-            except Exception as exc:
-                raise ConfigError(
-                    "langchain-openai is required for LLM_BACKEND=bedrock. "
-                    "Install with: uv add langchain-openai"
-                ) from exc
+        if not self.settings.anthropic_api_key:
+            raise ConfigError("ANTHROPIC_API_KEY is required. Set it in your .env file.")
 
-            if not self.settings.bedrock_api_key:
-                raise ConfigError(
-                    "LLM_BACKEND=bedrock requires a Bedrock API key. "
-                    "Set BEDROCK_API_KEY in your .env file."
-                )
-
-            self.llm = ChatOpenAI(
-                model=self.settings.bedrock_model,          # e.g. openai.gpt-oss-20b
-                base_url=self.settings.bedrock_base_url,    # <-- THE BEDROCK URL GOES HERE (from .env)
-                api_key=self.settings.bedrock_api_key,      # from .env
-                temperature=0.2,
-            )
-
-        elif backend == "anthropic":
-            # Claude via Bedrock's Anthropic-native Messages API (/anthropic endpoint).
-            try:
-                from langchain_anthropic import ChatAnthropic
-            except Exception as exc:
-                raise ConfigError(
-                    "langchain-anthropic is required for LLM_BACKEND=anthropic. "
-                    "Install with: uv add langchain-anthropic"
-                ) from exc
-
-            if not self.settings.anthropic_api_key:
-                raise ConfigError(
-                    "LLM_BACKEND=anthropic requires ANTHROPIC_API_KEY in your .env file."
-                )
-
-            self.llm = ChatAnthropic(
-                model=self.settings.anthropic_model,
-                base_url=self.settings.anthropic_base_url,
-                api_key=self.settings.anthropic_api_key,
-                temperature=0.2,
-                max_tokens=300,
-            )
-
-        elif backend == "bedrock_native":
-            from langchain_aws import ChatBedrockConverse
-            self.llm = ChatBedrockConverse(
-                model=self.settings.bedrock_model,
-                region_name=os.getenv("AWS_REGION", "us-east-1"),
-                temperature=0.2,
-                max_tokens=300,
-            )
-        else:
-            # Default / "ollama" backend (local Gemma via Ollama).
-            try:
-                from langchain_ollama import ChatOllama
-            except Exception as exc:
-                raise ConfigError(
-                    "langchain-ollama is required for LLM_BACKEND=ollama. "
-                    "Install with: uv add langchain-ollama"
-                ) from exc
-
-            self.llm = ChatOllama(
-                model=self.settings.ollama_model,
-                base_url=self.settings.ollama_base_url,
-                temperature=0.2,
-            )
+        self.llm = ChatAnthropic(
+            model=self.settings.anthropic_model,
+            base_url=self.settings.anthropic_base_url,
+            api_key=self.settings.anthropic_api_key,
+            temperature=0.2,
+            max_tokens=300,
+        )
 
         self.system_prompt = _load_system_prompt()
-
         self.prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", self.system_prompt),
                 MessagesPlaceholder(variable_name="history"),
-                (
-                    "human",
-                    "Question: {question}\n\nContext:\n{context}",
-                ),
+                ("human", "Question: {question}\n\nContext:\n{context}"),
             ]
         )
         self.chain = self.prompt | self.llm
@@ -184,7 +111,6 @@ class CapyLLM:
         )
 
     def _is_escalation_request(self, q: str) -> bool:
-        """Detect explicit requests to reach a human representative."""
         lowered = q.lower().strip()
         if lowered in {"agent", "human", "representative", "rep"}:
             return True
@@ -195,15 +121,13 @@ class CapyLLM:
             "talk to an agent",
             "real person",
             "customer service rep",
-            "talk to a human",
             "talk to someone",
         ]
         return any(phrase in lowered for phrase in phrases)
 
     def _is_competitor_request(self, q: str) -> bool:
-        """Detect requests to compare or recommend non-CapAir airlines."""
         lowered = q.lower().strip()
-        if "airline" not in lowered and "airlines" not in lowered:
+        if "airline" not in lowered:
             return False
         phrases = [
             "recommend a different airline",
@@ -217,16 +141,13 @@ class CapyLLM:
         return any(phrase in lowered for phrase in phrases)
 
     def answer(self, question: str, session_id: str = "cli") -> str:
-        """Route the user message before deciding whether to retrieve and call the LLM."""
         q = question.strip()
 
         if not q:
             return "Please provide a question for me to answer."
-
         if len(q) > 700:
             return "Your question is too long. Please shorten it to 700 characters or less."
 
-        # --- Escalation: explicit request for a human takes priority ---
         if self._is_escalation_request(q):
             return self.escalation
 
@@ -238,29 +159,20 @@ class CapyLLM:
             )
 
         intent = classify_intent(q)
-
-        # Safety and repair intents always take priority.
         if intent.intent == "safety":
             return self.safety_redirect
-
         if intent.intent == "repair":
             return self.repair_redirect
 
-        # Retrieve first so a strong match can override a weak/incorrect intent label.
         matches = retrieve_chunks(q)
         has_relevant = self._has_relevant_match(matches)
 
-        # Only redirect as "other" if retrieval ALSO fails to find anything relevant.
-        # This rescues short/vague-but-on-topic questions (e.g. "tell me about CO2")
-        # that the intent classifier mislabels as "other".
         if intent.intent == "other" and not has_relevant:
             return self.domain_redirect
-
         if not has_relevant:
             return self.no_match
 
         strong = [m for m in matches if float(m.get("similarity", 0.0)) >= self.min_similarity]
-
         if not strong:
             return self.no_match
 
@@ -281,39 +193,29 @@ class CapyLLM:
 
         if any(x in text.lower() for x in ["not in the context", "don't know", "do not know"]):
             return self.fallback
-        
+
         return _strip_markdown(text)
 
-    
-
     def _has_relevant_match(self, matches: list[dict]) -> bool:
-        """Check whether the top retrieval hit is strong enough to trust."""
         if not matches:
             return False
-        top_score = float(matches[0].get("similarity", 0.0))
-        return top_score >= self.min_top_similarity
+        return float(matches[0].get("similarity", 0.0)) >= self.min_top_similarity
 
     @staticmethod
     def _build_context(matches: list[dict]) -> str:
-        """Format retrieved chunks into LLM context."""
-        blocks = []
-        for item in matches:
-            blocks.append(
-                f"Source: {item['source_file']} | Chunk: {item['chunk_index']}\n{item['content']}"
-            )
-        return "\n\n".join(blocks)
+        return "\n\n".join(
+            f"Source: {item['source_file']} | Chunk: {item['chunk_index']}\n{item['content']}"
+            for item in matches
+        )
 
     def _friendly_llm_error(self, exc: Exception) -> str | None:
-        """Return a user-friendly backend error message when known failures occur."""
-        message = str(exc)
-        lowered = message.lower()
-        backend = (self.settings.llm_backend or "unknown").strip().lower()
+        lowered = str(exc).lower()
         exc_name = type(exc).__name__.lower()
 
-        if "connection refused" in lowered or "connecterror" in exc_name:
+        if "connection refused" in lowered or "connecterror" in exc_name or "apiconnectionerror" in exc_name:
             return (
-                f"Could not reach the {backend} backend. "
-                "Make sure the service is running and try again."
+                "Could not reach the model backend. "
+                "Check your internet connection and ANTHROPIC_BASE_URL / credentials in .env, then try again."
             )
 
         auth_markers = [
@@ -335,7 +237,6 @@ class CapyLLM:
 
 
 def main() -> None:
-    """CLI entry point for asking questions in the terminal."""
     parser = argparse.ArgumentParser(description="Ask a question against the ingested PDF vector store.")
     parser.add_argument("--question", help="Optional question. If omitted, the app asks interactively.")
     parser.add_argument("--session-id", default="cli", help="Session id for chat memory.")
@@ -357,7 +258,6 @@ def main() -> None:
                 continue
             if q.lower() in {"exit", "quit"}:
                 break
-
             print("\nAnswer:\n")
             print(llm.answer(q, session_id=args.session_id))
             print()
